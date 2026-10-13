@@ -24,7 +24,7 @@ pipeline {
                 )]) {
                     powershell '''
                         $ErrorActionPreference = 'Stop'
-                        $env:DOCKERHUB_TOKEN | docker login --username $env:DOCKERHUB_USER --password-stdin
+                        $env:DOCKERHUB_TOKEN.Trim() | docker login --username $env:DOCKERHUB_USER.Trim() --password-stdin
                         if ($LASTEXITCODE -ne 0) { throw 'Docker login gagal' }
                         try {
                             docker push "${env:IMAGE_NAME}:${env:BUILD_NUMBER}"
