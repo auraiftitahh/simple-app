@@ -50,11 +50,26 @@ pipeline {
                             throw 'Token credential Jenkins kosong'
                         }
 
-                        $env:DOCKERHUB_TOKEN.Trim() |
-                            docker login --username auraiftitahh --password-stdin
-
-                        if ($LASTEXITCODE -ne 0) {
-                            throw 'Docker login gagal'
+                        $loginInfo = New-Object System.Diagnostics.ProcessStartInfo
+                        $loginInfo.FileName = 'docker.exe'
+                        $loginInfo.Arguments = 'login --username auraiftitahh --password-stdin'
+                        $loginInfo.UseShellExecute = $false
+                        $loginInfo.RedirectStandardInput = $true
+                        $loginInfo.CreateNoWindow = $true
+                        
+                        $loginProcess = New-Object System.Diagnostics.Process
+                        $loginProcess.StartInfo = $loginInfo
+                        
+                        [void]$loginProcess.Start()
+                        $loginProcess.StandardInput.WriteLine($env:DOCKERHUB_TOKEN.Trim())
+                        $loginProcess.StandardInput.Close()
+                        $loginProcess.WaitForExit()
+                        
+                        $loginExitCode = $loginProcess.ExitCode
+                        $loginProcess.Dispose()
+                        
+                        if ($loginExitCode -ne 0) {
+                            throw 'Docker login gagal melalui standard input langsung'
                         }
 
                         try {
