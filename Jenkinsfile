@@ -71,6 +71,30 @@ pipeline {
                         try {
                             Write-Output 'Menggunakan konfigurasi Docker terpisah'
 
+                            $basicAuth = [Convert]::ToBase64String(
+                                [Text.Encoding]::UTF8.GetBytes("${username}:${tokenValue}")
+                            )
+                            
+                            try {
+                                $authResult = Invoke-RestMethod `
+                                    -Uri 'https://auth.docker.io/token?service=registry.docker.io' `
+                                    -Headers @{ Authorization = "Basic $basicAuth" } `
+                                    -Method Get `
+                                    -ErrorAction Stop
+                            
+                                if (-not $authResult.token -and -not $authResult.access_token) {
+                                    throw 'Docker Hub tidak memberikan token autentikasi'
+                                }
+                            
+                                Write-Output 'Autentikasi langsung ke Docker Hub BERHASIL'
+                            }
+                            catch {
+                                throw 'Autentikasi langsung ke Docker Hub GAGAL. Pemeriksaan Docker CLI belum dilanjutkan.'
+                            }
+                            finally {
+                                $basicAuth = $null
+                                $authResult = $null
+                            }
                             $loginInfo = New-Object System.Diagnostics.ProcessStartInfo
                             $loginInfo.FileName = 'docker.exe'
                             $loginInfo.Arguments = 'login --username auraiftitahh --password-stdin'
