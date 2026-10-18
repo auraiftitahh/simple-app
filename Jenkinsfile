@@ -29,126 +29,75 @@ pipeline {
         }
 
         stage('Push Docker Image') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-test',
-                    usernameVariable: 'DOCKERHUB_USER',
-                    passwordVariable: 'DOCKERHUB_TOKEN'
-                )]) {
-                    powershell '''
-                        $ErrorActionPreference = 'Stop'
-
-                        if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_TOKEN)) {
-                            throw 'Token Jenkins kosong'
-                        }
-
-                        $tokenValue = $env:DOCKERHUB_TOKEN.Trim()
-                        $username = $env:DOCKERHUB_USER.Trim()
-
-                        if ($username -ne 'auraiftitahh') {
-                            throw 'Username credential tidak sesuai'
-                        }
-
-                        if (-not $tokenValue.StartsWith('dckr_pat_')) {
-                            throw 'Format token Docker Hub tidak sesuai'
-                        }
-
-                        $env:DOCKER_CONFIG = Join-Path $env:TEMP (
-                            'jenkins-docker-' + [guid]::NewGuid().ToString()
-                        )
-
-                        New-Item -ItemType Directory -Path $env:DOCKER_CONFIG -Force |
-                            Out-Null
-
-                        $configFile = Join-Path $env:DOCKER_CONFIG 'config.json'
-
-                        [System.IO.File]::WriteAllText(
-                            $configFile,
-                            '{"auths":{}}',
-                            [System.Text.UTF8Encoding]::new($false)
-                        )
-
-                        try {
-                            Write-Output 'Menggunakan konfigurasi Docker terpisah'
-
-                            $basicAuth = [Convert]::ToBase64String(
-                                [Text.Encoding]::UTF8.GetBytes("${username}:${tokenValue}")
+                steps {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'dockerhub-test',
+                        usernameVariable: 'DOCKERHUB_USER',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )]) {
+                        powershell '''
+                            $ErrorActionPreference = 'Stop'
+            
+                            $username = $env:DOCKERHUB_USER.Trim()
+                            $token = $env:DOCKERHUB_TOKEN.Trim()
+            
+                            $configDir = Join-Path $env:TEMP (
+                                'jenkins-docker-' + [guid]::NewGuid().ToString()
                             )
-                            
+                            New-Item -ItemType Directory -Path $configDir |
+                                Out-Null
+            
+                            $configFile = Join-Path $configDir 'config.json'
+            
                             try {
-                                $authResult = Invoke-RestMethod `
-                                    -Uri 'https://auth.docker.io/token?service=registry.docker.io' `
-                                    -Headers @{ Authorization = "Basic $basicAuth" } `
-                                    -Method Get `
-                                    -ErrorAction Stop
-                            
-                                if (-not $authResult.token -and -not $authResult.access_token) {
-                                    throw 'Docker Hub tidak memberikan token autentikasi'
-                                }
-                            
-                                Write-Output 'Autentikasi langsung ke Docker Hub BERHASIL'
-                            }
-                            catch {
-                                throw 'Autentikasi langsung ke Docker Hub GAGAL. Pemeriksaan Docker CLI belum dilanjutkan.'
-                            }
-                            finally {
-                                $basicAuth = $null
-                                $authResult = $null
-                            }
-                            $loginInfo = New-Object System.Diagnostics.ProcessStartInfo
-                            $loginInfo.FileName = 'docker.exe'
-                            $loginInfo.Arguments = 'login --username auraiftitahh --password-stdin'
-                            $loginInfo.UseShellExecute = $false
-                            $loginInfo.RedirectStandardInput = $true
-                            $loginInfo.CreateNoWindow = $true
-
-                            $loginProcess = New-Object System.Diagnostics.Process
-                            $loginProcess.StartInfo = $loginInfo
-
-                            try {
-                                [void]$loginProcess.Start()
-                                $inputBytes = [System.Text.UTF8Encoding]::new($false).GetBytes(
-                                    $tokenValue + "`n"
+                                $auth = [Convert]::ToBase64String(
+                                    [Text.Encoding]::UTF8.GetBytes(
+                                        "${username}:${token}"
+                                    )
                                 )
-                                
-                                $inputStream = $loginProcess.StandardInput.BaseStream
-                                $inputStream.Write($inputBytes, 0, $inputBytes.Length)
-                                $inputStream.Flush()
-                                $inputStream.Close()
-                                
-                                [Array]::Clear($inputBytes, 0, $inputBytes.Length)
-                                $loginProcess.WaitForExit()
-
-                                if ($loginProcess.ExitCode -ne 0) {
-                                    throw 'Docker login gagal'
+            
+                                $config = @{
+                                    auths = @{
+                                        'https://index.docker.io/v1/' = @{
+                                            auth = $auth
+                                        }
+                                    }
+                                } | ConvertTo-Json -Depth 5
+            
+                                [IO.File]::WriteAllText(
+                                    $configFile,
+                                    $config,
+                                    [Text.UTF8Encoding]::new($false)
+                                )
+            
+                                Write-Output 'Push menggunakan credential konfigurasi sementara'
+            
+                                docker --config "$configDir" push "${env:IMAGE_NAME}:${env:BUILD_NUMBER}"
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw 'Push image bernomor gagal'
+                                }
+            
+                                docker tag "${env:IMAGE_NAME}:${env:BUILD_NUMBER}" "${env:IMAGE_NAME}:latest"
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw 'Pembuatan tag latest gagal'
+                                }
+            
+                                docker --config "$configDir" push "${env:IMAGE_NAME}:latest"
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw 'Push latest gagal'
                                 }
                             }
                             finally {
-                                $loginProcess.Dispose()
+                                if (Test-Path -LiteralPath $configFile) {
+                                    Remove-Item -LiteralPath $configFile -Force
+                                }
+            
+                                $auth = $null
+                                $config = $null
+                                $token = $null
                             }
-
-                            docker push "${env:IMAGE_NAME}:${env:BUILD_NUMBER}"
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Docker push gagal'
-                            }
-
-                            docker tag "${env:IMAGE_NAME}:${env:BUILD_NUMBER}" "${env:IMAGE_NAME}:latest"
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Docker tag gagal'
-                            }
-
-                            docker push "${env:IMAGE_NAME}:latest"
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Docker push latest gagal'
-                            }
-                        }
-                        finally {
-                            if (Test-Path -LiteralPath $configFile) {
-                                Remove-Item -LiteralPath $configFile -Force
-                            }
-                            $tokenValue = $null
-                        }
-                    '''
+                        '''
+                    }
                 }
             }
         }
