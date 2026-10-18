@@ -50,6 +50,22 @@ pipeline {
                             throw 'Token credential Jenkins kosong'
                         }
 
+                        $tokenValue = $env:DOCKERHUB_TOKEN.Trim()
+
+                        if ($tokenValue.StartsWith('{AQAA')) {
+                            throw 'Pipeline menerima teks terenkripsi, bukan token asli'
+                        }
+                        
+                        if (-not $tokenValue.StartsWith('dckr_pat_')) {
+                            throw 'Format token yang diterima pipeline tidak sesuai'
+                        }
+                        
+                        if ($tokenValue -match '\\s') {
+                            throw 'Token mengandung spasi atau baris baru'
+                        }
+                        
+                        Write-Output 'Format token yang diterima Jenkins valid'
+
                         $loginInfo = New-Object System.Diagnostics.ProcessStartInfo
                         $loginInfo.FileName = 'docker.exe'
                         $loginInfo.Arguments = 'login --username auraiftitahh --password-stdin'
