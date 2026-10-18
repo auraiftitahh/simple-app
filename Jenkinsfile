@@ -66,6 +66,21 @@ pipeline {
                         
                         Write-Output 'Format token yang diterima Jenkins valid'
 
+                        $env:DOCKER_CONFIG = Join-Path $env:TEMP (
+                            'jenkins-docker-' + [guid]::NewGuid().ToString()
+                        )
+                        
+                        New-Item -ItemType Directory -Path $env:DOCKER_CONFIG -Force |
+                            Out-Null
+                        
+                        $configFile = Join-Path $env:DOCKER_CONFIG 'config.json'
+                        [System.IO.File]::WriteAllText(
+                            $configFile,
+                            '{"auths":{}}',
+                            [System.Text.UTF8Encoding]::new($false)
+                        )
+                        
+                        Write-Output 'Menggunakan konfigurasi Docker terpisah'
                         $loginInfo = New-Object System.Diagnostics.ProcessStartInfo
                         $loginInfo.FileName = 'docker.exe'
                         $loginInfo.Arguments = 'login --username auraiftitahh --password-stdin'
@@ -104,8 +119,9 @@ pipeline {
                                 throw 'Docker push latest gagal'
                             }
                         }
-                        finally {
-                            docker logout
+                        docker logout
+                        if (Test-Path -LiteralPath $configFile) {
+                            Remove-Item -LiteralPath $configFile -Force
                         }
                     '''
                 }
