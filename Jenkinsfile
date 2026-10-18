@@ -107,8 +107,16 @@ pipeline {
 
                             try {
                                 [void]$loginProcess.Start()
-                                $loginProcess.StandardInput.WriteLine($tokenValue)
-                                $loginProcess.StandardInput.Close()
+                                $inputBytes = [System.Text.UTF8Encoding]::new($false).GetBytes(
+                                    $tokenValue + "`n"
+                                )
+                                
+                                $inputStream = $loginProcess.StandardInput.BaseStream
+                                $inputStream.Write($inputBytes, 0, $inputBytes.Length)
+                                $inputStream.Flush()
+                                $inputStream.Close()
+                                
+                                [Array]::Clear($inputBytes, 0, $inputBytes.Length)
                                 $loginProcess.WaitForExit()
 
                                 if ($loginProcess.ExitCode -ne 0) {
