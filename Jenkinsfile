@@ -38,72 +38,63 @@ pipeline {
                     powershell '''
                         $ErrorActionPreference = 'Stop'
 
-                        if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_USER)) {
-                            throw 'Username credential Jenkins kosong'
-                        }
-
-                        if ($env:DOCKERHUB_USER.Trim() -ne 'auraiftitahh') {
-                            throw 'Username credential Jenkins tidak sesuai'
-                        }
-
                         if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_TOKEN)) {
-                            throw 'Token credential Jenkins kosong'
+                            throw 'Token Jenkins kosong'
                         }
 
                         $tokenValue = $env:DOCKERHUB_TOKEN.Trim()
+                        $username = $env:DOCKERHUB_USER.Trim()
 
-                        if ($tokenValue.StartsWith('{AQAA')) {
-                            throw 'Pipeline menerima teks terenkripsi, bukan token asli'
+                        if ($username -ne 'auraiftitahh') {
+                            throw 'Username credential tidak sesuai'
                         }
-                        
+
                         if (-not $tokenValue.StartsWith('dckr_pat_')) {
-                            throw 'Format token yang diterima pipeline tidak sesuai'
+                            throw 'Format token Docker Hub tidak sesuai'
                         }
-                        
-                        if ($tokenValue -match '\\s') {
-                            throw 'Token mengandung spasi atau baris baru'
-                        }
-                        
-                        Write-Output 'Format token yang diterima Jenkins valid'
 
                         $env:DOCKER_CONFIG = Join-Path $env:TEMP (
                             'jenkins-docker-' + [guid]::NewGuid().ToString()
                         )
-                        
+
                         New-Item -ItemType Directory -Path $env:DOCKER_CONFIG -Force |
                             Out-Null
-                        
+
                         $configFile = Join-Path $env:DOCKER_CONFIG 'config.json'
+
                         [System.IO.File]::WriteAllText(
                             $configFile,
                             '{"auths":{}}',
                             [System.Text.UTF8Encoding]::new($false)
                         )
-                        
-                        Write-Output 'Menggunakan konfigurasi Docker terpisah'
-                        $loginInfo = New-Object System.Diagnostics.ProcessStartInfo
-                        $loginInfo.FileName = 'docker.exe'
-                        $loginInfo.Arguments = 'login --username auraiftitahh --password-stdin'
-                        $loginInfo.UseShellExecute = $false
-                        $loginInfo.RedirectStandardInput = $true
-                        $loginInfo.CreateNoWindow = $true
-                        
-                        $loginProcess = New-Object System.Diagnostics.Process
-                        $loginProcess.StartInfo = $loginInfo
-                        
-                        [void]$loginProcess.Start()
-                        $loginProcess.StandardInput.WriteLine($env:DOCKERHUB_TOKEN.Trim())
-                        $loginProcess.StandardInput.Close()
-                        $loginProcess.WaitForExit()
-                        
-                        $loginExitCode = $loginProcess.ExitCode
-                        $loginProcess.Dispose()
-                        
-                        if ($loginExitCode -ne 0) {
-                            throw 'Docker login gagal melalui standard input langsung'
-                        }
 
                         try {
+                            Write-Output 'Menggunakan konfigurasi Docker terpisah'
+
+                            $loginInfo = New-Object System.Diagnostics.ProcessStartInfo
+                            $loginInfo.FileName = 'docker.exe'
+                            $loginInfo.Arguments = 'login --username auraiftitahh --password-stdin'
+                            $loginInfo.UseShellExecute = $false
+                            $loginInfo.RedirectStandardInput = $true
+                            $loginInfo.CreateNoWindow = $true
+
+                            $loginProcess = New-Object System.Diagnostics.Process
+                            $loginProcess.StartInfo = $loginInfo
+
+                            try {
+                                [void]$loginProcess.Start()
+                                $loginProcess.StandardInput.WriteLine($tokenValue)
+                                $loginProcess.StandardInput.Close()
+                                $loginProcess.WaitForExit()
+
+                                if ($loginProcess.ExitCode -ne 0) {
+                                    throw 'Docker login gagal'
+                                }
+                            }
+                            finally {
+                                $loginProcess.Dispose()
+                            }
+
                             docker push "${env:IMAGE_NAME}:${env:BUILD_NUMBER}"
                             if ($LASTEXITCODE -ne 0) {
                                 throw 'Docker push gagal'
@@ -119,9 +110,11 @@ pipeline {
                                 throw 'Docker push latest gagal'
                             }
                         }
-                        docker logout
-                        if (Test-Path -LiteralPath $configFile) {
-                            Remove-Item -LiteralPath $configFile -Force
+                        finally {
+                            if (Test-Path -LiteralPath $configFile) {
+                                Remove-Item -LiteralPath $configFile -Force
+                            }
+                            $tokenValue = $null
                         }
                     '''
                 }
